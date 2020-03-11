@@ -103,9 +103,7 @@ fn add(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
     // check for the name
     let name = match args.single::<String>() {
         Ok(x) => x,
-        Err(_) => {
-            return dm_user_err(http, msg, "No name found.");
-        }
+        Err(_) => return dm_user_err(http, msg, "No name found."),
     };
 
     // check if there is exactly one attachment
@@ -120,18 +118,15 @@ fn add(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
         return dm_user_err(http, msg, "6MB is the size limit for images.");
     }
 
-    // check if the attachment is an image
-    let dimensions = match attachment.dimensions() {
-        Some(x) => x,
-        None => {
-            return dm_user_err(http, msg, "Attachment is not an image.");
+    // check if the attachment is an image and check for best size of emotes (128x128px)
+    match attachment.dimensions() {
+        Some(dimensions) => {
+            if dimensions.0 < 120 || dimensions.1 < 120 {
+                return dm_user_err(http, msg, "Image must be at least 128x128px.");
+            }
         }
+        None => return dm_user_err(http, msg, "Attachment is not an image."),
     };
-
-    // best size for emoji is 128x128px
-    if dimensions.0 < 120 || dimensions.1 < 120 {
-        return dm_user_err(http, msg, "Image must be at least 128x128px.");
-    }
 
     // get the attachment
     let img = match attachment.download() {
@@ -157,9 +152,7 @@ fn add(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
         .and_then(OsStr::to_str)
     {
         Some(x) => x,
-        None => {
-            return dm_user_err(http, msg, "Filename is not processable.");
-        }
+        None => return dm_user_err(http, msg, "Filename is not processable."),
     };
 
     // check image type
@@ -168,9 +161,8 @@ fn add(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
     }
 
     let mut buf = Vec::new();
-    let thumb_filename = format!("{}.png", name);
     let emote = Emote {
-        name,
+        name: name.clone(),
         author: msg.author.name.to_string(),
     };
 
@@ -198,7 +190,7 @@ fn add(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
 
     let bot_msg1 = match CHANNEL.send_message(&ctx.http, |m| {
         m.content(format!("{}", emote.name));
-        m.add_files(vec![(&*buf, &*thumb_filename)])
+        m.add_files(vec![(&*buf, &*format!("{}.png", name))])
     }) {
         Ok(x) => x,
         Err(why) => {
