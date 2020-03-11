@@ -3,6 +3,7 @@ use env_logger;
 use image;
 use image::ImageOutputFormat::Png;
 use lazy_static::lazy_static;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serenity::{
     framework::standard::{
@@ -89,12 +90,13 @@ fn add(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
     let http = ctx.http.clone();
     let mut users = USERS.write().unwrap();
 
+    println!("{}   Args for stats: {}", msg.author.name, &args.message());
     let user = users.entry(msg.author.id).or_insert(User {
         name: msg.author.name.clone(),
         counter: 0,
     });
 
-    if user.counter == 3 {
+    if user.counter == 10 {
         return dm_user_err(http, msg, "You can only post 3 suggestions.");
     }
 
@@ -239,54 +241,45 @@ fn add(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
 fn stats(ctx: &mut Context, msg: &Message) -> CommandResult {
     let http = ctx.http.clone();
     let messages = MESSAGES.read().unwrap();
-    let mut content = String::new();
 
-    for emsg in messages.values() {
-        let updated_msg = match http
-            .as_ref()
-            .get_message(emsg.messages[1].channel_id.0, emsg.messages[1].id.0)
-        {
-            Ok(updated_msg) => updated_msg,
-            Err(why) => {
-                dm_user(http, msg, "Discord error, pls try again later.");
-                return Err(CommandError(format!("Getting latest msg: {:?}", why)));
+    let content: String = messages
+        .values()
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .filter_map(|emsg: &EmoteMessage| {
+            emsg.messages[1]
+                .channel_id
+                .message(&http, emsg.messages[1].id)
+                .ok()
+                .map(|m| (emsg, m))
+        })
+        .map(|(emsg, umsg)| {
+            let (pos, neg) =
+                umsg.reactions
+                    .iter()
+                    .fold((0, 0), |(pos, neg), r| match &r.reaction_type {
+                        ReactionType::Unicode(n) if n == "👍" => (r.count, neg),
+                        ReactionType::Unicode(n) if n == "👎" => (pos, r.count),
+                        _ => (pos, neg),
+                    });
+            if pos * neg == 0 {
+                return String::from("Error, could not retrieve votes");
             }
-        };
+            format!(
+                "\n{}: {:.6} from: {}",
+                emsg.emote.name,
+                pos as f64 / neg as f64,
+                emsg.emote.author
+            )
+        })
+        .reduce(String::new, |acc, s| acc + &s);
 
-        let mut positive = 0;
-        let mut negative = 0;
-        for reaction in updated_msg.reactions {
-            if !(reaction.me) {
-                continue;
-            }
-
-            match reaction.reaction_type {
-                ReactionType::Unicode(n) => match &*n {
-                    "👍" => positive = reaction.count,
-                    "👎" => negative = reaction.count,
-                    _ => unreachable!(),
-                },
-                _ => {
-                    return dm_user_err(http, msg, "Discord error, pls try again later.");
-                }
-            };
-        }
-
-        if positive == 0 || negative == 0 {
-            return dm_user_err(http, msg, "Reaction counter is not readable.");
-        }
-
-        content.push_str(&*format!(
-            "{}:    {:.6}     from: {}\n",
-            emsg.emote.name,
-            positive as f64 / negative as f64,
-            emsg.emote.author,
-        ));
-    }
-
-    if let Err(why) = msg.channel_id.say(ctx, content) {
+    if let Err(why) = msg.channel_id.say(ctx, &content) {
         dm_user(http, msg, "Discord error, pls try again later.");
-        return Err(CommandError(format!("Sending msg: {:?}", why)));
+        return Err(CommandError(format!(
+            "Sending msg: {:?}, message was: {}",
+            why, content
+        )));
     };
 
     Ok(())
@@ -300,6 +293,7 @@ fn remove(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
     let http = ctx.http.clone();
     let mut messages = MESSAGES.write().unwrap();
 
+    println!("{}   Args for stats: {}", msg.author.name, &args.message());
     let parsed = args
         .single::<u64>()
         .map(|id| MessageId(id))
