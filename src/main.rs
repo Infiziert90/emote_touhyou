@@ -96,7 +96,7 @@ fn add(ctx: &mut Context, msg: &Message, mut args: Args) -> CommandResult {
         counter: 0,
     });
 
-    if user.counter == 10 {
+    if user.counter == 3 {
         return dm_user_err(http, msg, "You can only post 3 suggestions.");
     }
 
