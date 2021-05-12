@@ -37,4 +37,4 @@ Example:
 ## Help?
 
 Add me on discord and message me with your problem:
-Infi#8527
+Infi#6958
